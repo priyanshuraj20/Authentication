@@ -1,6 +1,8 @@
 // these end point is for creating a new access token with a refesh token
 import jwt from "jsonwebtoken";
 import config from "../config/config.js";
+import crypto from "crypto";
+import sessionModel from "../models/session.model.js";
 
 export default async function refreshToken(req, res) {
   const refreshToken = req.cookies.refreshToken;
@@ -11,24 +13,57 @@ export default async function refreshToken(req, res) {
     });
   }
   //if refresh token found than verify it and , so genrate new access token:
-  const decoded = JsonWebTokenError.verify(refreshToken, config.JWT_SECRET);
+  const decoded = jwt.verify(refreshToken, config.JWT_SECRET);
 
+  //session agar revoked nahi hain toh hi yeh refresh token ka use karke access token ka genrate karo warna nahi karo :
+
+  const refreshTokenHash = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+
+  const session = await sessionModel.findOne({
+    refreshTokenHash,
+    revoked: false,
+  });
+
+  if (!session) {
+    return res.status(401).json({
+      message: "Invalid referesh token",
+    });
+  }
 
   //for extra layer of security we genrate new refresh token also :
 
-
   //isse yeh hota ki galti se refresh token attacker ke pas aa bhi gaya toh refresh token sirf 15 min ke liye hoi rahega , fir new access token genrate hone ke samay new refresh token genrate hojayega ,. also , we have inauncthenticate old refresh token
-  const newRefreshToken = jwt.sign({
-    id:decoded.id
-  },config.JWT_SECRET,{
-    expiresIn:"&d"
-  })
-res.cookie("refreshToken", refreshToken, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "strict",
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-});
+  const newRefreshToken = jwt.sign(
+    {
+      id: decoded.id,
+    },
+    config.JWT_SECRET,
+    {
+      expiresIn: "&d",
+    },
+  );
+
+  //so we have create new sesion as new refresh tokjen has been genrated:
+  const newrefreshTokenHashed = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+  const newsession = await sessionModel.create({
+    user: user._id,
+    refreshTokenHash: newrefreshTokenHashed,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
   const accessToken = jwt.sign(
     {
       id: decoded.id,

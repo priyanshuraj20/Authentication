@@ -5,6 +5,7 @@ import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
 import config from "../config/config.js";
+import sessionModel from "../models/session.model.js";
 
 export default async function register(req, res) {
   const { username, email, password } = req.body;
@@ -34,15 +35,6 @@ export default async function register(req, res) {
     password: hashedPassword,
   });
 
-  const accessToken = jwt.sign(
-    {
-      id: user._id,
-    },
-    config.JWT_SECRET,
-    {
-      expiresIn: "15m",
-    },
-  );
   const refreshToken = jwt.sign(
     {
       id: user._id,
@@ -52,12 +44,37 @@ export default async function register(req, res) {
       expiresIn: "15d",
     },
   );
-  res.cookie("refreshToken",refreshToken,{
-    httpOnly:true,
-    secure:true,
-    sameSite:"strict",
-    maxAge: 15 * 24 * 60 * 60 * 1000
-  })
+
+  //creating the session:
+
+  const refreshTokenHashed = crypto
+    .createHash("sha256")
+    .update(refreshToken)
+    .digest("hex");
+  const session = await sessionModel.create({
+    user: user._id,
+    refreshTokenHash: refreshTokenHashed,
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  const accessToken = jwt.sign(
+    {
+      id: user._id,
+      sessionId: session._id,
+    },
+    config.JWT_SECRET,
+    {
+      expiresIn: "15m",
+    },
+  );
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 15 * 24 * 60 * 60 * 1000,
+  });
 
   res.status(201).json({
     message: "UseRegistered Successfully",
